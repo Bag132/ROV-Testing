@@ -1,4 +1,4 @@
-class SMBus():
+class SMBus:
     def __init__(self, bus_num):
         print('SMBus | init')
 
