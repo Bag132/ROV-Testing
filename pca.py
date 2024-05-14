@@ -153,7 +153,7 @@ class PCA9685:
         '''
         mode_1 = self.__i2c_bus.read_byte_data(self.__i2c_address, PCA_REG_MODE_1)
         sleep_state = mode_1 & PCA_M1_SLEEP
-        print("Sleep State: ", sleep_state)
+        # print("Sleep State: ", sleep_state)
         if sleep_on and not sleep_state:
             mode_1 |= PCA_M1_SLEEP
             self.__i2c_bus.write_byte_data(self.__i2c_address, PCA_REG_MODE_1, mode_1)
@@ -201,7 +201,7 @@ class PCA9685:
             self.__i2c_bus.write_byte_data(self.__i2c_address, PCA_REG_MODE_1, mode_1)
 
         prescale_val = round((self.__osc_frequency * 1000000.0) / (4096.0 * pwm_freq_hz)) - 1
-        print("prescale_val: ", prescale_val)
+        # print("prescale_val: ", prescale_val)
         self.__i2c_bus.write_byte_data(self.__i2c_address, PCA_REG_PRE_SCALE, prescale_val)
 
         if not sleep_state:

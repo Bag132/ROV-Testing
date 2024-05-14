@@ -55,7 +55,8 @@ class PIDController:
         # Calculate PIDF terms
         p_out = self.kP * error
         i_out = self.kI * self.i_accum
-        d_out = self.kD * (de / dt)
+        # d_out = self.kD * (de / dt)
+        d_out = 0
         f_out = self.kF * self.setpoint
         pid_output = p_out + i_out + d_out + f_out
 
