@@ -1,6 +1,7 @@
 class SMBus:
     def __init__(self, bus_num):
-        print('SMBus | init')
+        # print('SMBus | init')
+        pass
 
     def read_byte_data(self, address, reg):
         # print('SMBus | Read byte data')
@@ -19,5 +20,5 @@ class SMBus:
         return 0
 
     def close(self):
-        print('SMBus | Close')
+        # print('SMBus | Close')
         return 0

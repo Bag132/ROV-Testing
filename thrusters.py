@@ -325,7 +325,7 @@ class Thrusters:
 
         self.desired_twist = Twist()
 
-        self.rotation_quat = Quaternion(0, 0, 0, 1)
+        self.measured_quat = Quaternion(0, 0, 0, 1)
         self.desired_rotation = Quaternion(0, 0, 0, 1)
         self.rotation_offset = np.quaternion(1, 0, 0, 0)
         self.test_rot_setpoint = np.quaternion(1, 0, 0, 0)
@@ -343,7 +343,7 @@ class Thrusters:
         # self.pitch_controller = PIDController(p=0.1111)
         # self.yaw_controller = PIDController(p=0.11111)
         self.quat_controller = QuatPIDController(p=1.1)
-        self.depth_controller = PIDController(p=.5, d=0)
+        self.depth_controller = PIDController(p=.5, d=0, f=0)
 
     @property
     def pca(self):
@@ -356,36 +356,65 @@ class Thrusters:
         Args:
             r (Quaternion): ROV rotation
         """
-        # a = Quaternion(r.z, r.y, r.x, r.w)
-        self.rotation_quat = r
+        self.measured_quat = r
 
-    def get_ros_rotation(self):
-        return self.rotation_quat
+    def get_ros_rotation(self) -> Quaternion:
+        """
+        Get most recent measured ros rotation
+
+        Returns:
+            Quaternion representing current orientation
+        """
+        return self.measured_quat
 
     def set_desired_rotation(self, r_d: Quaternion) -> None:
+        """
+        Set PID orientation setpoint
+
+        Args:
+            r_d (Quaternion): Desired ros quaternion
+        """
         self.desired_rotation = r_d
 
-    def set_rotation_offset(self):
-        # self.rotation_offset = self.rotation_quat
-        self.rotation_offset = to_np_quat(self.rotation_quat)
+    def set_rotation_offset(self) -> None:
+        """
+        Set current rotation as the rotation offset
+        """
+        self.rotation_offset = to_np_quat(self.measured_quat)
 
-    def set_measured_depth(self, depth_m):
+    def set_measured_depth(self, depth_m: float) -> None:
+        """
+        Set measured depth read from depth sensor
+
+        Args:
+            depth_m (float): Depth in meters
+        """
         self.measured_depth = depth_m
 
     def get_current_rotation(self) -> quaternion:
-        r_c = to_np_quat(self.rotation_quat)  # Rotation current
-        r_o = self.rotation_offset  # Rotation offset
-        r_r = r_c.inverse() * r_o  # Rotation of ROV
-        # print(r_r)
+        """
+        Get current rotation while accounting for offset
+
+        Returns:
+            np.quaternion orientation
+        """
+        r_c = to_np_quat(self.measured_quat)  # Rotation current
+        # Inverse rotate measured rotation by offset to get offsetted rotation
+        r_r = r_c * self.rotation_offset.inverse()
         return r_r
 
     def get_depth(self):
+        # Get current rotation and turn it into a scipy dtype
         q = self.get_current_rotation()
         q_sci = Rotation.from_quat([q.x, q.y, q.z, q.w])
-        bar02_offset = (BAR_02_LENGTH_OFFSET, BAR_02_WIDTH_OFFSET, BAR_02_HEIGHT_OFFSET)  # xyz point
-        position = q_sci.apply(bar02_offset)
-        depth_offset = position[2]  # Only care about z because z is depth
 
+        # Make Bar02 offset position tuple
+        bar02_offset = (BAR_02_LENGTH_OFFSET, BAR_02_WIDTH_OFFSET, BAR_02_HEIGHT_OFFSET)
+
+        bar02_position = q_sci.apply(bar02_offset)  # Rotate Bar02 offset by the current ROV rotation
+        depth_offset = bar02_position[2]  # Get z component because z corresponds to depth
+
+        # Subtract bar02 offset from measured depth
         return self.measured_depth - depth_offset  # TODO Add instead?
 
     def set_test_rot_setpoint(self):
@@ -431,10 +460,24 @@ class Thrusters:
     def get_thrust_outputs(self):
         return self.thrust_outputs
 
-    def get_pwm_period_outputs(self):
+    def get_pwm_period_outputs(self) -> list[float]:
+        """
+        Get most recent pwm period microsecond outputs
+
+        Returns:
+            list of microsecond periods for each thruster
+        """
         return self.us_outputs
 
-    def print_thrust_vector(self, thruster_outputs, print_vector_numbers=False):
+    def print_thrust_vector(self, thruster_outputs, print_vector_numbers=False) -> None:
+        """
+        Prints information about thrust values
+
+        Args:
+            thruster_outputs (list[float]):       Thruster outputs kgf
+            print_vector_numbers (bool, optional):   Print calculated input twist
+        """
+
         horizontal_input = horizontal_thruster_config @ thruster_outputs[:4]
         vertical_input = vertical_thruster_config @ thruster_outputs[4:]
 
@@ -486,7 +529,17 @@ class Thrusters:
         print(
             f'X: {x_direction}, Y: {y_direction}, Z: {z_direction}, Roll: {roll_direction}, Pitch: {pitch_direction}, Yaw: {yaw_direction}\n')
 
-    def copy_twist(self, t):
+    def copy_twist(self, t: Twist) -> Twist:
+        """
+        Copies twist ros message type
+
+        Args:
+            t (Twist): Twist object to be copied
+
+        Returns:
+            New twist object
+
+        """
         new_twist = Twist()
 
         new_twist.linear.x = t.linear.x
@@ -505,10 +558,10 @@ class Thrusters:
         Set the desired thrust vector
 
         Args:
-            t (Twist):               Desired ROV twist
-            depth_lock (bool, optional):        Drive the ROV at a constant depth. Defaults to False.
+            t (Twist):                          Desired ROV twist
+            depth_lock (bool, optional):        Drive the ROV without giving depth changing thrust. Defaults to False.
             depth_command (float, optional):    Control the ROV depth thrust manually. Defaults to None.
-            depth_setpoint (float, optional):   Use PIDF to go to a certain depth setpoint
+            depth_setpoint (float, optional):   Use PIDF to go to a certain depth setpoint. Defaults to None.
         """
 
         thrust_twist = self.copy_twist(t)
@@ -526,7 +579,7 @@ class Thrusters:
 
         if depth_setpoint:
             self.depth_controller.set_setpoint(depth_setpoint)
-            depth_vec = np.array([0, 0, -self.depth_controller.calculate(self.get_depth())])
+            depth_vec = np.array([0, 0, -self.depth_controller.calculate(self.get_depth())])  # TODO: Move to update()
             depth_command = current_rot_sci.apply(depth_vec)
         elif depth_command:
             depth_vec = np.array([0, 0, depth_command])
@@ -537,13 +590,20 @@ class Thrusters:
         # print(f'depth_command = {depth_command}')
         if depth_lock:
             # Keep only x and y components of the direction
-            rov_relative_linear = rotate_2d(thrust_twist.linear.x, thrust_twist.linear.y,
-                                            current_rot_sci.as_euler('xyz')[2])
-            desired_direction = np.array([rov_relative_linear[0], rov_relative_linear[1], 0])
+            c_e = current_rot_sci.as_euler('xyz')
+            c_e[2] = 0
+            no_yaw = Rotation.from_euler('xyz', c_e)
 
-            # Rotate current rotation to the desir ed direction
+            # desired_direction = np.array([rov_relative_linear[0], rov_relative_linear[1], 0])
+            desired_direction = np.array([thrust_twist.linear.x, thrust_twist.linear.y, 0])
+
             # Rotate desired direction by the current rotation
-            rov_direction = current_rot_sci.apply(desired_direction)
+            rov_direction = no_yaw.apply(desired_direction)
+            # rov_direction = current_rot_sci.apply(desired_direction)
+            print('Desired direction = (%01.03f, %01.03f, %01.03f)\n'
+                  'Result direction  = (%01.03f, %01.03f, %01.03f)'
+                  % (desired_direction[0], desired_direction[1], desired_direction[2],
+                     rov_direction[0], rov_direction[1], rov_direction[2]))
             thrust_twist.linear.x = rov_direction[0]
             thrust_twist.linear.y = rov_direction[1]
             thrust_twist.linear.z = rov_direction[2]
@@ -607,21 +667,21 @@ class Thrusters:
 
 
 if __name__ == '__main__':
-    rot = [0, 0, 0]
+    rot = [-45, -45, 90]
     rot_q = Rotation.from_euler('xyz', rot, degrees=True).as_quat(canonical=False)
     # Rotation.from_quat()
     # rot_q = quaternion.from_euler_angles([c * math.pi / 180.0 for c in rot])
 
     rot_q_ros = Quaternion(rot_q[0], rot_q[1], rot_q[2], rot_q[3])
-    print('%f, %f, %f, %f' % (rot_q_ros.w, rot_q_ros.x, rot_q_ros.y, rot_q_ros.z))
+    # print('%f, %f, %f, %f' % (rot_q_ros.w, rot_q_ros.x, rot_q_ros.y, rot_q_ros.z))
 
     thrusters = Thrusters()
 
     thrusters.set_rotation(rot_q_ros)
     thrusters.set_measured_depth(1)
-    print(f'Depth = {thrusters.get_depth()}')
+    # print(f'Depth = {thrusters.get_depth()}')
 
-    tw = Twist(Vector3(0, 0, 0), Vector3(0, 0, 0))
+    tw = Twist(Vector3(1, 0, 0), Vector3(0, 0, 0))
 
-    thrusters.set_thrust(tw, depth_lock=False, depth_setpoint=1)
+    thrusters.set_thrust(tw, depth_lock=True)
     thrusters.update()
