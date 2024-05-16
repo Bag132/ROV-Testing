@@ -524,8 +524,8 @@ class Thrusters:
             roll_direction = 'ZERO'
 
         if print_vector_numbers:
-            print(f'Linear XYZ: ({horizontal_input[0]}, {horizontal_input[1]}, {vertical_input[0]}), ' \
-                  f'Angular XYZ: ({vertical_input[2], vertical_input[1], horizontal_input[2]})')
+            print(f'Linear XYZ: {horizontal_input[0], horizontal_input[1], vertical_input[0]}, ' \
+                  f'Angular XYZ: {vertical_input[2], vertical_input[1], horizontal_input[2]}')
         print(
             f'X: {x_direction}, Y: {y_direction}, Z: {z_direction}, Roll: {roll_direction}, Pitch: {pitch_direction}, Yaw: {yaw_direction}\n')
 
@@ -592,7 +592,8 @@ class Thrusters:
             # Keep only x and y components of the direction
             c_e = current_rot_sci.as_euler('xyz')
             c_e[2] = 0
-            no_yaw = Rotation.from_euler('xyz', c_e)
+            # no_yaw = Rotation.from_euler('xyz', c_e)
+            no_yaw = Rotation.from_euler('xyz', [c_e[2], c_e[1], c_e[0]])
 
             # desired_direction = np.array([rov_relative_linear[0], rov_relative_linear[1], 0])
             desired_direction = np.array([thrust_twist.linear.x, thrust_twist.linear.y, 0])
@@ -600,10 +601,12 @@ class Thrusters:
             # Rotate desired direction by the current rotation
             rov_direction = no_yaw.apply(desired_direction)
             # rov_direction = current_rot_sci.apply(desired_direction)
+
             print('Desired direction = (%01.03f, %01.03f, %01.03f)\n'
                   'Result direction  = (%01.03f, %01.03f, %01.03f)'
                   % (desired_direction[0], desired_direction[1], desired_direction[2],
                      rov_direction[0], rov_direction[1], rov_direction[2]))
+
             thrust_twist.linear.x = rov_direction[0]
             thrust_twist.linear.y = rov_direction[1]
             thrust_twist.linear.z = rov_direction[2]
@@ -637,7 +640,7 @@ class Thrusters:
             'FLH: %02.04f FRH: %02.04f BLH: %02.04f BRH: %02.04f | FLV: %02.04f FRV: %02.04f BLV: %02.04f BRV: %02.04f'
             % (thrust_outputs[0], thrust_outputs[1], thrust_outputs[2], thrust_outputs[3],
                thrust_outputs[4], thrust_outputs[5], thrust_outputs[6], thrust_outputs[7]))
-
+        self.print_thrust_vector(thrust_outputs, print_vector_numbers=True)
         # Calculate PCA microsecond +period for each thruster
         us_outputs = [Thrusters.all_thrusters[i].get_us_from_thrust(thrust_outputs[i]) for i in
                       range(len(thrust_outputs))]
@@ -647,7 +650,7 @@ class Thrusters:
 
         q = self.get_current_rotation()
         e = Rotation.from_quat([q.x, q.y, q.z, q.w]).as_euler('xyz', degrees=True)
-        print(e)
+        print('%.02f, %.02f, %.02f' % (e[0], e[1], e[2]))
 
         # Current limit to avoid exploding the robot
         # current_limit(Thrusters.all_thrusters, us_outputs, NET_CURRENT_LIMIT)
@@ -667,7 +670,22 @@ class Thrusters:
 
 
 if __name__ == '__main__':
-    rot = [-45, -45, 90]
+    # # yaw pitch roll
+    # r = [0,
+    #      45 * math.pi / 180.,
+    #      45 * math.pi / 180.]
+    # current_rotation = Rotation.from_euler('zyx', r)
+    # print('ROV rotation: (%.03f, %.03f, %.03f)' % (r[0], r[1], r[2]))
+    #
+    # # x y z velocities
+    # des = [0, 1, 0]
+    # desired_global_direction = np.array([des[0], des[1], des[2]])
+    # print('Desired Global: (%.03f, %.03f, %.03f)' % (desired_global_direction[0], desired_global_direction[1], desired_global_direction[2]))
+    #
+    # rov_relative_direction = current_rotation.apply(desired_global_direction)
+    # print('ROV net thrust:(%.03f, %.03f, %.03f)' % (rov_relative_direction[0], rov_relative_direction[1], rov_relative_direction[2]))
+    # exit(0)
+    rot = [45, -45, 10]
     rot_q = Rotation.from_euler('xyz', rot, degrees=True).as_quat(canonical=False)
     # Rotation.from_quat()
     # rot_q = quaternion.from_euler_angles([c * math.pi / 180.0 for c in rot])
