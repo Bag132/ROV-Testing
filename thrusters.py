@@ -30,7 +30,7 @@ BAR_02_LENGTH_OFFSET = -0.2667
 BAR_02_WIDTH_OFFSET = 0.04318
 BAR_02_HEIGHT_OFFSET = 0.0254
 
-BUOYANT_FORCE = -1000 * -9.8 * 000  # TODO: APPROXIMATE BUOYANT FORCE BY MEASURING vertical THRUSTER OUTPUT while holding depth TO GET VOLUME DENSITY
+BUOYANT_FORCE_KGF = -1000 * -9.8 * 000  # TODO: APPROXIMATE BUOYANT FORCE BY MEASURING vertical THRUSTER OUTPUT while holding depth TO GET VOLUME DENSITY
 
 THRUSTER_DIAGONAL_DISTANCE_M = math.sqrt(THRUSTER_WIDTH_DISTANCE_M ** 2 + THRUSTER_LENGTH_DISTANCE_M ** 2)
 HALF_LENGTH = THRUSTER_LENGTH_DISTANCE_M / 2
@@ -524,8 +524,12 @@ class Thrusters:
             roll_direction = 'ZERO'
 
         if print_vector_numbers:
-            print(f'Linear XYZ: {horizontal_input[0], horizontal_input[1], vertical_input[0]}, ' \
-                  f'Angular XYZ: {vertical_input[2], vertical_input[1], horizontal_input[2]}')
+            # print(f'Linear XYZ: {horizontal_input[0], horizontal_input[1], vertical_input[0]}, ' \
+            #       f'Angular XYZ: {vertical_input[2], vertical_input[1], horizontal_input[2]}')
+
+            print('Linear XYZ: (%01.03f, %01.03f, %01.03f), Angular XYZ: (%01.03f, %01.03f, %01.03f)' %
+                  (horizontal_input[0], horizontal_input[1], vertical_input[0],
+                   vertical_input[2], vertical_input[1], horizontal_input[2]))
         print(
             f'X: {x_direction}, Y: {y_direction}, Z: {z_direction}, Roll: {roll_direction}, Pitch: {pitch_direction}, Yaw: {yaw_direction}\n')
 
@@ -590,10 +594,10 @@ class Thrusters:
         # print(f'depth_command = {depth_command}')
         if depth_lock:
             # Keep only x and y components of the direction
-            c_e = current_rot_sci.as_euler('xyz')
-            c_e[2] = 0
-            # no_yaw = Rotation.from_euler('xyz', c_e)
-            no_yaw = Rotation.from_euler('xyz', [c_e[2], c_e[1], c_e[0]])
+            c_e = current_rot_sci.as_euler('zyx')
+            c_e[0] = 0  # Zero yaw to keep everything relative to the camera
+
+            no_yaw = Rotation.from_euler('zyx', c_e)
 
             # desired_direction = np.array([rov_relative_linear[0], rov_relative_linear[1], 0])
             desired_direction = np.array([thrust_twist.linear.x, thrust_twist.linear.y, 0])
@@ -685,10 +689,8 @@ if __name__ == '__main__':
     # rov_relative_direction = current_rotation.apply(desired_global_direction)
     # print('ROV net thrust:(%.03f, %.03f, %.03f)' % (rov_relative_direction[0], rov_relative_direction[1], rov_relative_direction[2]))
     # exit(0)
-    rot = [45, -45, 10]
-    rot_q = Rotation.from_euler('xyz', rot, degrees=True).as_quat(canonical=False)
-    # Rotation.from_quat()
-    # rot_q = quaternion.from_euler_angles([c * math.pi / 180.0 for c in rot])
+    rot = [0, 0, 0]
+    rot_q = Rotation.from_euler('zyx', [rot[2], rot[1], rot[0]], degrees=True).as_quat(canonical=False)
 
     rot_q_ros = Quaternion(rot_q[0], rot_q[1], rot_q[2], rot_q[3])
     # print('%f, %f, %f, %f' % (rot_q_ros.w, rot_q_ros.x, rot_q_ros.y, rot_q_ros.z))
