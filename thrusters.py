@@ -71,6 +71,26 @@ vertical_thruster_config = np.array([[1, 1, 1, 1],
                                      [-HALF_LENGTH, -HALF_LENGTH, HALF_LENGTH, HALF_LENGTH],
                                      [-HALF_WIDTH, HALF_WIDTH, -HALF_WIDTH, HALF_WIDTH]])
 
+full_thruster_config = np.array([[math.cos(thruster_angles[0]),
+                                  math.cos(thruster_angles[1]),
+                                  -math.cos(thruster_angles[2]),
+                                  -math.cos(thruster_angles[3])],
+                                 [math.sin(thruster_angles[0]),
+                                  -math.sin(thruster_angles[1]),
+                                  math.sin(thruster_angles[2]),
+                                  -math.sin(thruster_angles[3])],
+                                 [1, 1, 1, 1],
+                                 [-HALF_WIDTH, HALF_WIDTH, -HALF_WIDTH, HALF_WIDTH],
+                                 [-HALF_LENGTH, -HALF_LENGTH, HALF_LENGTH, HALF_LENGTH],
+                                 [HALF_DIAGONAL * math.sin(
+                                     thruster_angles[0] - LENGTH_DIAGONAL_ANGLE_RAD),
+                                  -HALF_DIAGONAL * math.sin(
+                                      thruster_angles[1] - LENGTH_DIAGONAL_ANGLE_RAD),
+                                  -HALF_DIAGONAL * math.sin(
+                                      thruster_angles[2] - LENGTH_DIAGONAL_ANGLE_RAD),
+                                  HALF_DIAGONAL * math.sin(
+                                      thruster_angles[3] - LENGTH_DIAGONAL_ANGLE_RAD)]])
+
 v_U, v_S, v_V_T = np.linalg.svd(vertical_thruster_config)
 v_S = np.diag(v_S)
 v_S_inv = np.linalg.inv(v_S)
@@ -81,6 +101,16 @@ v_U_T = np.transpose(v_U)
 
 horizontal_factor = h_V @ h_S_inv_0 @ h_U_T
 vertical_factor = v_V @ v_S_inv_0 @ v_U_T
+
+h_plus = np.linalg.pinv(horizontal_thruster_config)
+full_config_plus = np.linalg.pinv(full_thruster_config)
+twist_vec = [1, 0, 0, 0, 0, 0]
+test_vec = [1, 0, 0]
+thrusts_pinv = h_plus @ test_vec
+thrusts_svd = horizontal_factor @ test_vec
+print(f'Thrusts pinv: \n{thrusts_pinv}')
+print(f'Thrusts svd: \n{thrusts_svd}')
+print(f'Full pinv: \n{full_config_plus @ twist_vec}')
 
 # Constants to use for feedforward control
 MAX_THRUST_KGF = 1.768181818
@@ -401,6 +431,7 @@ class Thrusters:
         r_c = to_np_quat(self.measured_quat)  # Rotation current
         # Inverse rotate measured rotation by offset to get offsetted rotation
         r_r = r_c * self.rotation_offset.inverse()
+        # r_r = r_c
         return r_r
 
     def get_depth(self):
@@ -423,12 +454,11 @@ class Thrusters:
     def get_ros_quat(self):
         ros_quat = Quaternion()
         q = self.get_current_rotation()
-        q_arr = quaternion.as_float_array(q)
 
-        ros_quat.w = q_arr[0]
-        ros_quat.x = q_arr[1]
-        ros_quat.y = q_arr[2]
-        ros_quat.z = q_arr[3]
+        ros_quat.w = q.w
+        ros_quat.x = q.x
+        ros_quat.y = q.y
+        ros_quat.z = q.z
 
         return ros_quat
 
@@ -459,6 +489,14 @@ class Thrusters:
 
     def get_thrust_outputs(self):
         return self.thrust_outputs
+
+    def get_incline(self):
+        reference_plane = np.array([0, 0, 1])
+        rot_np = self.get_current_rotation()
+        rot_sci = Rotation.from_quat([rot_np.x, rot_np.y, rot_np.z, rot_np.w])
+        rov_plane = rot_sci.apply(reference_plane)
+        incline = math.acos(rov_plane[2] / math.hypot(rov_plane[0], rov_plane[1], rov_plane[2]))
+        return incline
 
     def get_pwm_period_outputs(self) -> list[float]:
         """
@@ -627,8 +665,7 @@ class Thrusters:
         Calculate PID outputs and set PCA PWM values
         """
 
-        d = self.desired_twist
-
+        d = self.copy_twist(self.desired_twist)
         if control_orientation:
             q_r = self.get_current_rotation()
             q_d = to_np_quat(self.test_rot_setpoint)
@@ -653,8 +690,8 @@ class Thrusters:
         self.us_outputs = us_outputs
 
         q = self.get_current_rotation()
-        e = Rotation.from_quat([q.x, q.y, q.z, q.w]).as_euler('xyz', degrees=True)
-        print('%.02f, %.02f, %.02f' % (e[0], e[1], e[2]))
+        e = Rotation.from_quat([q.x, q.y, q.z, q.w]).as_euler('zyx', degrees=True)
+        print('%.02f, %.02f, %.02f' % (e[2], e[1], e[0]))
 
         # Current limit to avoid exploding the robot
         # current_limit(Thrusters.all_thrusters, us_outputs, NET_CURRENT_LIMIT)
@@ -689,7 +726,8 @@ if __name__ == '__main__':
     # rov_relative_direction = current_rotation.apply(desired_global_direction)
     # print('ROV net thrust:(%.03f, %.03f, %.03f)' % (rov_relative_direction[0], rov_relative_direction[1], rov_relative_direction[2]))
     # exit(0)
-    rot = [0, 0, 0]
+    zero_rot = Quaternion(0, 0, 0, 1)
+    rot = [0, 35, 0]
     rot_q = Rotation.from_euler('zyx', [rot[2], rot[1], rot[0]], degrees=True).as_quat(canonical=False)
 
     rot_q_ros = Quaternion(rot_q[0], rot_q[1], rot_q[2], rot_q[3])
@@ -697,11 +735,16 @@ if __name__ == '__main__':
 
     thrusters = Thrusters()
 
+    thrusters.set_rotation(zero_rot)
+    thrusters.set_test_rot_setpoint()
+
     thrusters.set_rotation(rot_q_ros)
     thrusters.set_measured_depth(1)
     # print(f'Depth = {thrusters.get_depth()}')
 
-    tw = Twist(Vector3(1, 0, 0), Vector3(0, 0, 0))
+    tw = Twist(Vector3(0, 0, 0), Vector3(0, 0, 0))
 
     thrusters.set_thrust(tw, depth_lock=True)
-    thrusters.update()
+    thrusters.update(control_orientation=True)
+
+    print(thrusters.get_incline() * 180 / math.pi)
