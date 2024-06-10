@@ -12,6 +12,10 @@ from thruster_data import *
 
 # from typing import override
 
+from thruster_data import *
+
+import sys
+
 sys.path.append('/home/jetson/catkin_ws/src/wurov2_0/src/controllers')
 
 from controllers import PIDController, QuatPIDController
@@ -481,6 +485,20 @@ class Thrusters:
         ros_rot.z = e[0] * (180.0 / math.pi)
         return ros_rot
 
+    def get_rot_error_euler(self):
+        q = self.get_current_rotation()
+        q_d = self.test_rot_setpoint
+        q_e = self.quat_controller.get_quat_error(q=q, q_d=q_d)
+        q_e_sci = Rotation.from_quat([q_e.x, q_e.y, q_e.z, q_e.w])
+
+        e = q_e_sci.as_euler('zyx')
+
+        ros_rot = Vector3()
+        ros_rot.x = e[2] * (180.0 / math.pi)
+        ros_rot.y = e[1] * (180.0 / math.pi)
+        ros_rot.z = e[0] * (180.0 / math.pi)
+        return ros_rot
+
     def get_roll_pitch_feedforwards(self, rot: Quaternion):
         r = euler_from_quaternion(rot.w, rot.y, rot.z, rot.w)
         pitch_ff = math.sin(r[1]) * HALF_LENGTH
@@ -498,7 +516,7 @@ class Thrusters:
         incline = math.acos(rov_plane[2] / math.hypot(rov_plane[0], rov_plane[1], rov_plane[2]))
         return incline
 
-    def get_pwm_period_outputs(self) -> list[float]:
+    def get_pwm_period_outputs(self):
         """
         Get most recent pwm period microsecond outputs
 
@@ -520,9 +538,11 @@ class Thrusters:
         vertical_input = vertical_thruster_config @ thruster_outputs[4:]
 
         if horizontal_input[0] > 0.0001:
-            x_direction = 'FORWARD'
-        elif horizontal_input[0] < -0.0001:
             x_direction = 'BACKWARD'
+            # x_direction = 'FORWARD'
+        elif horizontal_input[0] < -0.0001:
+            # x_direction = 'BACKWARD'
+            x_direction = 'FORWARD'
         else:
             x_direction = 'ZERO'
 
@@ -548,9 +568,11 @@ class Thrusters:
             yaw_direction = 'ZERO'
 
         if vertical_input[1] > 0.0001:
-            pitch_direction = 'UP (CCW)'
-        elif vertical_input[1] < -0.0001:
+            # pitch_direction = 'UP (CCW)'
             pitch_direction = 'DOWN (CW)'
+        elif vertical_input[1] < -0.0001:
+            # pitch_direction = 'DOWN (CW)'
+            pitch_direction = 'UP (CCW)'
         else:
             pitch_direction = 'ZERO'
 
@@ -561,10 +583,14 @@ class Thrusters:
         else:
             roll_direction = 'ZERO'
 
+        print(
+            'FLH: %02.04f FRH: %02.04f BLH: %02.04f BRH: %02.04f | FLV: %02.04f FRV: %02.04f BLV: %02.04f BRV: %02.04f'
+            % (thruster_outputs[0], thruster_outputs[1], thruster_outputs[2], thruster_outputs[3],
+               thruster_outputs[4], thruster_outputs[5], thruster_outputs[6], thruster_outputs[7]))
+
         if print_vector_numbers:
             # print(f'Linear XYZ: {horizontal_input[0], horizontal_input[1], vertical_input[0]}, ' \
             #       f'Angular XYZ: {vertical_input[2], vertical_input[1], horizontal_input[2]}')
-
             print('Linear XYZ: (%01.03f, %01.03f, %01.03f), Angular XYZ: (%01.03f, %01.03f, %01.03f)' %
                   (horizontal_input[0], horizontal_input[1], vertical_input[0],
                    vertical_input[2], vertical_input[1], horizontal_input[2]))
@@ -594,14 +620,14 @@ class Thrusters:
 
         return new_twist
 
-    def set_thrust(self, t: Twist, depth_lock: bool = False,
+    def set_thrust(self, t: Twist, xy_drive: bool = False,
                    depth_command: float = None, depth_setpoint: float = None) -> None:
         """
         Set the desired thrust vector
 
         Args:
             t (Twist):                          Desired ROV twist
-            depth_lock (bool, optional):        Drive the ROV without giving depth changing thrust. Defaults to False.
+            xy_drive (bool, optional):        Drive the ROV without giving depth changing thrust. Defaults to False.
             depth_command (float, optional):    Control the ROV depth thrust manually. Defaults to None.
             depth_setpoint (float, optional):   Use PIDF to go to a certain depth setpoint. Defaults to None.
         """
@@ -615,7 +641,7 @@ class Thrusters:
 
             # current_rot_sci_no_z = Rotation.from_quat()
         except ValueError:
-            print('depth_lock not applied (invalid quat)')
+            print('xy_drive not applied (invalid quat)')
             self.desired_twist = thrust_twist
             return
 
@@ -623,14 +649,16 @@ class Thrusters:
             self.depth_controller.set_setpoint(depth_setpoint)
             depth_vec = np.array([0, 0, -self.depth_controller.calculate(self.get_depth())])  # TODO: Move to update()
             depth_command = current_rot_sci.apply(depth_vec)
+            thrust_twist.linear.z = 0  # nullify twist Z
         elif depth_command:
-            depth_vec = np.array([0, 0, depth_command])
+            depth_vec = np.array([0, 0, -depth_command])
             depth_command = current_rot_sci.apply(depth_vec)
+            thrust_twist.linear.z = 0  # nullify twist Z
         else:
             depth_command = np.array([0, 0, 0])
 
         # print(f'depth_command = {depth_command}')
-        if depth_lock:
+        if xy_drive:
             # Keep only x and y components of the direction
             c_e = current_rot_sci.as_euler('zyx')
             c_e[0] = 0  # Zero yaw to keep everything relative to the camera
@@ -675,12 +703,9 @@ class Thrusters:
             d.angular.y = qc_output[1]
             d.angular.z = qc_output[2]
 
-        thrust_outputs = get_thruster_outputs(d.linear.x, d.linear.y, d.linear.z, d.angular.x, d.angular.y, d.angular.z)
+        thrust_outputs = get_thruster_outputs(-d.linear.x, d.linear.y, d.linear.z, d.angular.x, d.angular.y,
+                                              d.angular.z)
 
-        print(
-            'FLH: %02.04f FRH: %02.04f BLH: %02.04f BRH: %02.04f | FLV: %02.04f FRV: %02.04f BLV: %02.04f BRV: %02.04f'
-            % (thrust_outputs[0], thrust_outputs[1], thrust_outputs[2], thrust_outputs[3],
-               thrust_outputs[4], thrust_outputs[5], thrust_outputs[6], thrust_outputs[7]))
         self.print_thrust_vector(thrust_outputs, print_vector_numbers=True)
         # Calculate PCA microsecond +period for each thruster
         us_outputs = [Thrusters.all_thrusters[i].get_us_from_thrust(thrust_outputs[i]) for i in
@@ -691,7 +716,7 @@ class Thrusters:
 
         q = self.get_current_rotation()
         e = Rotation.from_quat([q.x, q.y, q.z, q.w]).as_euler('zyx', degrees=True)
-        print('%.02f, %.02f, %.02f' % (e[2], e[1], e[0]))
+        # print('%.02f, %.02f, %.02f' % (e[2], e[1], e[0]))
 
         # Current limit to avoid exploding the robot
         # current_limit(Thrusters.all_thrusters, us_outputs, NET_CURRENT_LIMIT)
@@ -744,7 +769,7 @@ if __name__ == '__main__':
 
     tw = Twist(Vector3(0, 0, 0), Vector3(0, 0, 0))
 
-    thrusters.set_thrust(tw, depth_lock=True)
+    thrusters.set_thrust(tw, xy_drive=True)
     thrusters.update(control_orientation=True)
 
     print(thrusters.get_incline() * 180 / math.pi)

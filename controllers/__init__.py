@@ -78,16 +78,22 @@ class QuatPIDController:
         self.prev_x_e = 0
         self.prev_y_e = 0
         self.prev_z_e = 0
+        self.error = 0
 
     def set_setpoint(self, q):
         self.setpoint = q
 
+    def get_quat_error(self, q=None, q_d=None):
+        if q is not None and q_d is not None:
+            self.error = q.inverse() * q_d
+        return self.error
+
     def calculate(self, q):
-        error = self.setpoint.inverse() * q
+        self.error = q.inverse() * self.setpoint
         # error =
 
-        if error.w < 0:
-            error = -error
+        if self.error.w < 0:
+            self.error = -self.error
 
         dt = time.time() - self.previous_time
 
@@ -98,16 +104,16 @@ class QuatPIDController:
         # outputs[2] = error.z * self.kp + ((error.z - self.prev_z_e) / dt) * self.kd
 
         if dt == 0:
-            outputs[0] = error.x * 1.1  # + ((error.x - self.prev_x_e) / dt) * 0.0
-            outputs[1] = error.y * 1.1  # + ((error.y - self.prev_y_e) / dt) * 0.0
-            outputs[2] = error.z * 1.1  # + ((error.z - self.prev_z_e) / dt) * 0.0
+            outputs[0] = -self.error.x * 1.1  # + ((error.x - self.prev_x_e) / dt) * 0.0
+            outputs[1] = -self.error.y * 2.  # + ((error.y - self.prev_y_e) / dt) * 0.0
+            outputs[2] = self.error.z * 3  # + ((error.z - self.prev_z_e) / dt) * 0.0
         else:
-            outputs[0] = error.x * 1.1 + ((error.x - self.prev_x_e) / dt) * 0.0
-            outputs[1] = error.y * 1.1 + ((error.y - self.prev_y_e) / dt) * 0.0
-            outputs[2] = error.z * 1.1 + ((error.z - self.prev_z_e) / dt) * 0.0
+            outputs[0] = -(self.error.x * 1.1 + ((self.error.x - self.prev_x_e) / dt) * 0.0)
+            outputs[1] = -(self.error.y * 2. + ((self.error.y - self.prev_y_e) / dt) * 0.0)
+            outputs[2] = self.error.z * 3 + ((self.error.z - self.prev_z_e) / dt) * 1
 
-        self.prev_x_e = error.x
-        self.prev_y_e = error.y
-        self.prev_z_e = error.z
+        self.prev_x_e = self.error.x
+        self.prev_y_e = self.error.y
+        self.prev_z_e = self.error.z
 
         return outputs
